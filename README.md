@@ -6,6 +6,28 @@
 [![License](https://img.shields.io/crates/l/redb)](https://crates.io/crates/redb)
 [![dependency status](https://deps.rs/repo/github/cberner/redb/status.svg)](https://deps.rs/repo/github/cberner/redb)
 
+> [!WARNING]
+> This is a fork of the original redb project used to reproduce an LMDB corruption. More information on this corruption can be found [in this tracking issue](https://bugs.openldap.org/show_bug.cgi?id=9920), but essentially, it is a bug in the encryption-at-end feature.
+
+## How to Run this to Trigger the Corruption
+
+You must first need to clone the heed repository and checkout the `combined-lmdb-support` branch (works with https://github.com/meilisearch/heed/tree/ccd61c53862d9256734f4f0324e31b64b5999099).
+
+Clone [the heed repo](https://github.com/meilisearch/heed) with `git clone --recursive` to get the submodules then proceed to replace the `Cargo.toml` to support the encryption feature.
+
+```bash
+cp heed3-encryption/Cargo.toml heed/
+```
+
+Once everything's ready you should be good to go and run the redb benchmarks and observe.
+
+```bash
+rm -r .benchmark
+cargo bench --bench lmdb_benchmark
+```
+
+## Overview
+
 A simple, portable, high-performance, ACID, embedded key-value store.
 
 redb is written in pure Rust and is loosely inspired by [lmdb](http://www.lmdb.tech/doc/). Data is stored in a collection
