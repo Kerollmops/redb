@@ -65,8 +65,16 @@ fn main() {
 
     let lmdb_results = {
         let tmpfile: TempDir = tempfile::tempdir_in(current_dir().unwrap()).unwrap();
+        let mut key = eax::Key::<aes::Aes256>::default();
+        argon2::Argon2::default()
+            .hash_password_into(b"Je suis un joyeux dev", b"Ici c'est mon sel", &mut key)
+            .unwrap();
+
+        // We open the environment
+        let mut options =
+            heed::EnvOpenOptions::<eax::Eax<aes::Aes256, eax::aead::consts::U0>>::new_encrypted_with(key);
         let env = unsafe {
-            heed::EnvOpenOptions::new()
+            options
                 .map_size(10 * 4096 * 1024 * 1024)
                 .open(tmpfile.path())
                 .unwrap()

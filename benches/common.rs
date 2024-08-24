@@ -49,7 +49,7 @@ pub trait BenchReadTransaction {
     where
         Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_>;
+    fn get_reader(&mut self) -> Self::T<'_>;
 }
 
 #[allow(clippy::len_without_is_empty)]
@@ -61,11 +61,11 @@ pub trait BenchReader {
     where
         Self: 'out;
 
-    fn get<'a>(&'a self, key: &[u8]) -> Option<Self::Output<'a>>;
+    fn get<'a>(&'a mut self, key: &[u8]) -> Option<Self::Output<'a>>;
 
-    fn range_from<'a>(&'a self, start: &'a [u8]) -> Self::Iterator<'a>;
+    fn range_from<'a>(&'a mut self, start: &'a [u8]) -> Self::Iterator<'a>;
 
-    fn len(&self) -> u64;
+    fn len(&mut self) -> u64;
 }
 
 pub trait BenchIterator {
@@ -113,7 +113,7 @@ pub struct RedbBenchReadTransaction {
 impl BenchReadTransaction for RedbBenchReadTransaction {
     type T<'txn> = RedbBenchReader where Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_> {
+    fn get_reader(&mut self) -> Self::T<'_> {
         let table = self.txn.open_table(X).unwrap();
         RedbBenchReader { table }
     }
@@ -127,16 +127,16 @@ impl BenchReader for RedbBenchReader {
     type Output<'out> = RedbAccessGuard<'out> where Self: 'out;
     type Iterator<'out> = RedbBenchIterator<'out> where Self: 'out;
 
-    fn get<'a>(&'a self, key: &[u8]) -> Option<Self::Output<'a>> {
+    fn get<'a>(&'a mut self, key: &[u8]) -> Option<Self::Output<'a>> {
         self.table.get(key).unwrap().map(RedbAccessGuard::new)
     }
 
-    fn range_from<'a>(&'a self, key: &'a [u8]) -> Self::Iterator<'a> {
+    fn range_from<'a>(&'a mut self, key: &'a [u8]) -> Self::Iterator<'a> {
         let iter = self.table.range(key..).unwrap();
         RedbBenchIterator { iter }
     }
 
-    fn len(&self) -> u64 {
+    fn len(&mut self) -> u64 {
         self.table.len().unwrap()
     }
 }
@@ -241,7 +241,7 @@ pub struct SledBenchReadTransaction<'db> {
 impl<'db> BenchReadTransaction for SledBenchReadTransaction<'db> {
     type T<'txn> = SledBenchReader<'db> where Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_> {
+    fn get_reader(&mut self) -> Self::T<'_> {
         SledBenchReader { db: self.db }
     }
 }
@@ -254,16 +254,16 @@ impl<'db> BenchReader for SledBenchReader<'db> {
     type Output<'out> = sled::IVec where Self: 'out;
     type Iterator<'out> = SledBenchIterator where Self: 'out;
 
-    fn get(&self, key: &[u8]) -> Option<sled::IVec> {
+    fn get(&mut self, key: &[u8]) -> Option<sled::IVec> {
         self.db.get(key).unwrap()
     }
 
-    fn range_from<'a>(&'a self, key: &'a [u8]) -> Self::Iterator<'a> {
+    fn range_from<'a>(&'a mut self, key: &'a [u8]) -> Self::Iterator<'a> {
         let iter = self.db.range(key..);
         SledBenchIterator { iter }
     }
 
-    fn len(&self) -> u64 {
+    fn len(&mut self) -> u64 {
         self.db.len() as u64
     }
 }
@@ -381,7 +381,8 @@ pub struct HeedBenchInserter<'txn, 'db> {
 
 impl BenchInserter for HeedBenchInserter<'_, '_> {
     fn insert(&mut self, key: &[u8], value: &[u8]) -> Result<(), ()> {
-        self.db.put(self.txn, key, value).map_err(|_| ())
+        self.db.put(self.txn, key, value).unwrap();
+        Ok(())
     }
 
     fn remove(&mut self, key: &[u8]) -> Result<(), ()> {
@@ -397,35 +398,35 @@ pub struct HeedBenchReadTransaction<'db> {
 impl<'db> BenchReadTransaction for HeedBenchReadTransaction<'db> {
     type T<'txn> = HeedBenchReader<'txn, 'db> where Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_> {
+    fn get_reader(&mut self) -> Self::T<'_> {
         Self::T {
             db: self.db,
-            txn: &self.txn,
+            txn: &mut self.txn,
         }
     }
 }
 
 pub struct HeedBenchReader<'txn, 'db> {
     db: heed::Database<heed::types::Bytes, heed::types::Bytes>,
-    txn: &'txn heed::RoTxn<'db>,
+    txn: &'txn mut heed::RoTxn<'db>,
 }
 
 impl<'txn, 'db> BenchReader for HeedBenchReader<'txn, 'db> {
     type Output<'out> = &'out [u8] where Self: 'out;
     type Iterator<'out> = HeedBenchIterator<'out> where Self: 'out;
 
-    fn get(&self, key: &[u8]) -> Option<&[u8]> {
+    fn get(&mut self, key: &[u8]) -> Option<&[u8]> {
         self.db.get(self.txn, key).unwrap()
     }
 
-    fn range_from<'a>(&'a self, key: &'a [u8]) -> Self::Iterator<'a> {
+    fn range_from<'a>(&'a mut self, key: &'a [u8]) -> Self::Iterator<'a> {
         let range = (Bound::Included(key), Bound::Unbounded);
         let iter = self.db.range(self.txn, &range).unwrap();
 
         Self::Iterator { iter }
     }
 
-    fn len(&self) -> u64 {
+    fn len(&mut self) -> u64 {
         self.db.stat(self.txn).unwrap().entries as u64
     }
 }
@@ -512,7 +513,7 @@ pub struct RocksdbBenchReadTransaction<'db> {
 impl<'db> BenchReadTransaction for RocksdbBenchReadTransaction<'db> {
     type T<'txn> = RocksdbBenchReader<'db, 'txn> where Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_> {
+    fn get_reader(&mut self) -> Self::T<'_> {
         RocksdbBenchReader {
             snapshot: &self.snapshot,
         }
@@ -527,11 +528,11 @@ impl<'db, 'txn> BenchReader for RocksdbBenchReader<'db, 'txn> {
     type Output<'out> = Vec<u8> where Self: 'out;
     type Iterator<'out> = RocksdbBenchIterator<'out> where Self: 'out;
 
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+    fn get(&mut self, key: &[u8]) -> Option<Vec<u8>> {
         self.snapshot.get(key).unwrap()
     }
 
-    fn range_from<'a>(&'a self, key: &'a [u8]) -> Self::Iterator<'a> {
+    fn range_from<'a>(&'a mut self, key: &'a [u8]) -> Self::Iterator<'a> {
         let iter = self
             .snapshot
             .iterator(IteratorMode::From(key, Direction::Forward));
@@ -539,7 +540,7 @@ impl<'db, 'txn> BenchReader for RocksdbBenchReader<'db, 'txn> {
         RocksdbBenchIterator { iter }
     }
 
-    fn len(&self) -> u64 {
+    fn len(&mut self) -> u64 {
         self.snapshot.iterator(IteratorMode::Start).count() as u64
     }
 }
@@ -648,7 +649,7 @@ pub struct SanakirjaBenchReadTransaction<'db> {
 impl<'db> BenchReadTransaction for SanakirjaBenchReadTransaction<'db> {
     type T<'txn> = SanakirjaBenchReader<'db, 'txn> where Self: 'txn;
 
-    fn get_reader(&self) -> Self::T<'_> {
+    fn get_reader(&mut self) -> Self::T<'_> {
         let table = self.txn.root_db(0).unwrap();
         SanakirjaBenchReader {
             txn: &self.txn,
@@ -667,19 +668,19 @@ impl<'db, 'txn> BenchReader for SanakirjaBenchReader<'db, 'txn> {
     type Output<'out> = &'out [u8] where Self: 'out;
     type Iterator<'out> = SanakirjaBenchIterator<'db, 'txn> where Self: 'out;
 
-    fn get(&self, key: &[u8]) -> Option<&[u8]> {
+    fn get(&mut self, key: &[u8]) -> Option<&[u8]> {
         sanakirja::btree::get(self.txn, &self.table, key, None)
             .unwrap()
             .map(|(_, v)| v)
     }
 
-    fn range_from<'a>(&'a self, key: &'a [u8]) -> Self::Iterator<'a> {
+    fn range_from<'a>(&'a mut self, key: &'a [u8]) -> Self::Iterator<'a> {
         let iter = sanakirja::btree::iter(self.txn, &self.table, Some((key, None))).unwrap();
 
         SanakirjaBenchIterator { iter }
     }
 
-    fn len(&self) -> u64 {
+    fn len(&mut self) -> u64 {
         sanakirja::btree::iter(self.txn, &self.table, None)
             .unwrap()
             .count() as u64

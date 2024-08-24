@@ -55,12 +55,14 @@ fn gen_data(count: usize, key_size: usize, value_size: usize) -> Vec<(Vec<u8>, V
 }
 
 fn lmdb_bench(path: &Path) {
-    let env = unsafe {
-        heed::EnvOpenOptions::new()
-            .map_size(4096 * 1024 * 1024)
-            .open(path)
-            .unwrap()
-    };
+    let mut key = chacha20poly1305::Key::default();
+    argon2::Argon2::default()
+        .hash_password_into(b"Je suis un joyeux dev", b"Ici c'est mon sel", &mut key)
+        .unwrap();
+
+    let mut options =
+        heed::EnvOpenOptions::<chacha20poly1305::ChaCha20Poly1305>::new_encrypted_with(key);
+    let env = unsafe { options.map_size(4096 * 1024 * 1024).open(path).unwrap() };
 
     let mut pairs = gen_data(1000, KEY_SIZE, VALUE_SIZE);
     let pairs_len = pairs.len();
@@ -88,7 +90,7 @@ fn lmdb_bench(path: &Path) {
         let mut key_order: Vec<usize> = (0..ELEMENTS).collect();
         key_order.shuffle(&mut rand::thread_rng());
 
-        let txn = env.read_txn().unwrap();
+        let mut txn = env.read_txn().unwrap();
         {
             for _ in 0..ITERATIONS {
                 let start = SystemTime::now();
@@ -97,7 +99,7 @@ fn lmdb_bench(path: &Path) {
                 for &i in &key_order {
                     let (key, value) = &mut pairs[i % pairs_len];
                     key[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-                    let result: &[u8] = db.get(&txn, key).unwrap().unwrap();
+                    let result: &[u8] = db.get(&mut txn, key).unwrap().unwrap();
                     checksum += result[0] as u64;
                     expected_checksum += value[0] as u64;
                 }

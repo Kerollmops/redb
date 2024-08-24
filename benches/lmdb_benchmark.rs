@@ -146,7 +146,7 @@ fn benchmark<T: BenchDatabase + Send + Sync>(db: T) -> Vec<(String, Duration)> {
     );
     results.push(("batch writes".to_string(), duration));
 
-    let txn = db.read_transaction();
+    let mut txn = db.read_transaction();
     {
         {
             let start = Instant::now();
@@ -163,7 +163,7 @@ fn benchmark<T: BenchDatabase + Send + Sync>(db: T) -> Vec<(String, Duration)> {
             let start = Instant::now();
             let mut checksum = 0u64;
             let mut expected_checksum = 0u64;
-            let reader = txn.get_reader();
+            let mut reader = txn.get_reader();
             for _ in 0..ELEMENTS {
                 let (key, value) = gen_pair(&mut rng);
                 let result = reader.get(&key).unwrap();
@@ -185,7 +185,7 @@ fn benchmark<T: BenchDatabase + Send + Sync>(db: T) -> Vec<(String, Duration)> {
         for _ in 0..ITERATIONS {
             let mut rng = make_rng();
             let start = Instant::now();
-            let reader = txn.get_reader();
+            let mut reader = txn.get_reader();
             let mut value_sum = 0;
             let num_scan = 10;
             for _ in 0..ELEMENTS {
@@ -213,7 +213,7 @@ fn benchmark<T: BenchDatabase + Send + Sync>(db: T) -> Vec<(String, Duration)> {
     }
     drop(txn);
 
-    for num_threads in [4, 8, 16, 32] {
+    for num_threads in [1, 4, 8, 16, 32] {
         let mut rngs = make_rng_shards(num_threads, ELEMENTS);
         let start = Instant::now();
 
@@ -222,10 +222,10 @@ fn benchmark<T: BenchDatabase + Send + Sync>(db: T) -> Vec<(String, Duration)> {
                 let db2 = db.clone();
                 let mut rng = rngs.pop().unwrap();
                 s.spawn(move || {
-                    let txn = db2.read_transaction();
+                    let mut txn = db2.read_transaction();
                     let mut checksum = 0u64;
                     let mut expected_checksum = 0u64;
-                    let reader = txn.get_reader();
+                    let mut reader = txn.get_reader();
                     for _ in 0..(ELEMENTS / num_threads) {
                         let (key, value) = gen_pair(&mut rng);
                         let result = reader.get(&key).unwrap();
@@ -299,8 +299,16 @@ fn main() {
 
     let lmdb_results = {
         let tmpfile: TempDir = tempfile::tempdir_in(&tmpdir).unwrap();
+        let mut key = eax::Key::<aes::Aes256>::default();
+        argon2::Argon2::default()
+            .hash_password_into(b"Je suis un joyeux dev", b"Ici c'est mon sel", &mut key)
+            .unwrap();
+
+        // We open the environment
+        let mut options =
+            heed::EnvOpenOptions::<eax::Eax<aes::Aes256, eax::aead::consts::U0>>::new_encrypted_with(key);
         let env = unsafe {
-            heed::EnvOpenOptions::new()
+            options
                 .map_size(4096 * 1024 * 1024)
                 .open(tmpfile.path())
                 .unwrap()
